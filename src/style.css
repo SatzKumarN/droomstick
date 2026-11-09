@@ -1,0 +1,36 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: #1b1a17;
+  overflow: hidden;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+#rotate {
+  display: none;
+  position: fixed;
+  inset: 0;
+  margin: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: #1b1a17;
+  color: #f4f1ea;
+  text-align: center;
+  font: 20px/1.4 sans-serif;
+}
+
+body.portrait #rotate {
+  display: flex;
+}
+
+body.portrait canvas {
+  visibility: hidden;
+}
