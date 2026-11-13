@@ -121,7 +121,18 @@ export type MuteButton = {
   label: string;
 };
 
-/** Sits to the right of the match clock, clear of the health rings. */
-export function muteButton(muted: boolean): MuteButton {
-  return { id: "mute", x: 116, y: 8, w: 104, h: 40, label: muted ? "Muted" : "Mute" };
+/**
+ * Sits to the right of the match clock, clear of the health rings.
+ * A narrow door puts it in the corner so it doesn't cover the title.
+ */
+export function muteButton(muted: boolean, width = 0): MuteButton {
+  const corner = width > 0 && width < 800;
+  return {
+    id: "mute",
+    x: corner ? 8 : 116,
+    y: 8,
+    w: corner ? 96 : 104,
+    h: 40,
+    label: muted ? "Muted" : "Mute",
+  };
 }

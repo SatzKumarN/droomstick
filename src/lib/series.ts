@@ -114,9 +114,9 @@ export function standings(series: Series): { slot: number; wins: number }[] {
 }
 
 export function seriesButtons(phase: SeriesPhase, width: number, height: number): SeriesButton[] {
-  const w = 148;
+  const w = Math.min(148, Math.max(96, width - 48));
   const h = 52;
-  const y = height / 2 + 48;
+  const y = Math.max(8, Math.min(height / 2 + 48, height - h - 12));
   if (phase === "lobby") {
     return [{ id: "start", x: (width - w) / 2, y, w, h, label: "Start" }];
   }

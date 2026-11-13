@@ -14,10 +14,15 @@ export function typeName(current: string, key: string): string {
   return current + key;
 }
 
-export function clampName(nickname: string): string {
+/** Live editing keeps a trailing space so the next word can be typed. */
+export function editName(value: string): string {
   let next = "";
-  for (const key of nickname.trim()) next = typeName(next, key);
-  return next.trim();
+  for (const key of value) next = typeName(next, key);
+  return next;
+}
+
+export function clampName(nickname: string): string {
+  return editName(nickname.trim()).trim();
 }
 
 export function displayName(nickname: string, colorName: string): string {

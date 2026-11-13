@@ -87,7 +87,7 @@ export function openGuest(
   const peer = new Peer();
   peer.on("open", () => {
     if (closed) return;
-    const conn = peer.connect(peerIdFor(code), { reliable: false });
+    const conn = peer.connect(peerIdFor(code), { reliable: true });
     link = conn;
     conn.on("open", () => handlers.onOpen());
     conn.on("data", (data) => handlers.onData(data));

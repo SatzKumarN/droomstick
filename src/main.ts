@@ -4,7 +4,6 @@ import {
   frameFromKeys,
   frameFromTouches,
   mergeFrames,
-  needsLandscape,
   noTouches,
   type HeldTouches,
   type InputFrame,
@@ -14,10 +13,11 @@ import {
   clockRuns,
   copiedStatus,
   decode,
-  doorButtons,
   encode,
   heldInput,
   kickButton,
+  layoutDoor,
+  takeGuestInput,
   type DoorView,
   type NetMessage,
 } from "./lib/net";
@@ -36,7 +36,7 @@ import {
   type Series,
   type SeriesButton,
 } from "./lib/series";
-import { displayName, typeName } from "./lib/name";
+import { NAME_LIMIT, displayName, editName, typeName } from "./lib/name";
 import { canStart } from "./lib/rules";
 import { muteButton, takeCues } from "./lib/sfx";
 import { applySnap, captureSnap } from "./lib/snap";
@@ -85,6 +85,39 @@ let muted = false;
 let heardCue = 0;
 let heardEpoch = 0;
 const voice = createVoice();
+const nameField = document.createElement("input");
+nameField.id = "name";
+nameField.maxLength = NAME_LIMIT;
+nameField.autocomplete = "off";
+nameField.spellcheck = false;
+nameField.placeholder = "Your name";
+nameField.setAttribute("aria-label", "Your name");
+nameField.enterKeyHint = "done";
+document.body.appendChild(nameField);
+nameField.addEventListener("input", () => {
+  const next = editName(nameField.value);
+  if (next !== nameField.value) nameField.value = next;
+  nickname = next;
+});
+
+function placeNameField(): void {
+  if (door.kind !== "pick") {
+    if (document.activeElement === nameField) nameField.blur();
+    nameField.hidden = true;
+    return;
+  }
+  const field = layoutDoor("pick", window.innerWidth, window.innerHeight, false).field;
+  if (!field) {
+    nameField.hidden = true;
+    return;
+  }
+  nameField.hidden = false;
+  nameField.style.left = `${field.x}px`;
+  nameField.style.top = `${field.y}px`;
+  nameField.style.width = `${field.w}px`;
+  nameField.style.height = `${field.h}px`;
+  if (document.activeElement !== nameField && nameField.value !== nickname) nameField.value = nickname;
+}
 
 function resize(): void {
   game.width = window.innerWidth;
@@ -95,6 +128,7 @@ resize();
 window.addEventListener("resize", resize);
 
 window.addEventListener("keydown", (event) => {
+  if (event.target === nameField) return;
   voice.unlock();
   const key = event.key.toLowerCase();
   if (!keys.has(key)) pressed.add(key);
@@ -199,7 +233,7 @@ function receive(raw: unknown): void {
   const message = decode(text);
   if (!message) return;
   if (message.t === "input") {
-    guestInput = message.frame;
+    guestInput = takeGuestInput(guestFresh ? guestInput : null, message.frame);
     guestFresh = true;
   } else if (message.t === "snap" && role === "guest") {
     applySnap(sim, message.snap);
@@ -296,6 +330,20 @@ function applyMenu(id: SeriesButton["id"]): void {
   }
 }
 
+function pushDigits(digits: string): void {
+  if (door.kind !== "join") return;
+  const next = digits.replace(/\D/g, "").slice(0, 6);
+  if (next === door.digits) return;
+  room?.close();
+  room = null;
+  door = {
+    kind: "join",
+    digits: next,
+    status: next.length === 6 ? "Connecting..." : "Enter the host code",
+  };
+  if (next.length === 6) connectGuest(next);
+}
+
 function applyAction(id: string): void {
   if (id === "mute") {
     muted = !muted;
@@ -321,21 +369,12 @@ function applyAction(id: string): void {
     leaveRoom();
     return;
   }
-  if (id === "copy" && door.kind === "host" && door.code) {
-    const code = door.code;
-    const status = copiedStatus(door.status);
-    if (copyCode(code)) {
-      door = { ...door, status };
-      return;
-    }
-    void navigator.clipboard?.writeText(code).then(
-      () => {
-        if (door.kind === "host" && door.code === code) door = { ...door, status };
-      },
-      () => {
-        if (door.kind === "host" && door.code === code) door = { ...door, status: "Could not copy the code" };
-      },
-    );
+  if (door.kind === "join" && /^d\d$/.test(id)) {
+    pushDigits(door.digits + id.slice(1));
+    return;
+  }
+  if (door.kind === "join" && id === "back") {
+    pushDigits(door.digits.slice(0, -1));
     return;
   }
   if (id === "kick" && role === "host") {
@@ -368,16 +407,33 @@ game.addEventListener("pointerdown", (event) => {
           ...(role === "host" && guestOn ? [kickButton(window.innerWidth)] : []),
         ]
       : [
-          muteButton(muted),
-          ...doorButtons(
+          muteButton(muted, window.innerWidth),
+          ...layoutDoor(
             door.kind,
             window.innerWidth,
             window.innerHeight,
             door.kind === "host" && door.canStart,
             door.kind === "host" && door.code.length === 6,
-          ),
+          ).buttons,
         ];
   const button = buttonAt(buttons, point.x, point.y);
+  if (button?.id === "copy" && door.kind === "host" && door.code) {
+    const code = door.code;
+    const status = copiedStatus(door.status);
+    if (copyCode(code)) {
+      door = { ...door, status };
+    } else {
+      void navigator.clipboard?.writeText(code).then(
+        () => {
+          if (door.kind === "host" && door.code === code) door = { ...door, status };
+        },
+        () => {
+          if (door.kind === "host" && door.code === code) door = { ...door, status: "Could not copy the code" };
+        },
+      );
+    }
+    return;
+  }
   if (button && (button.id === "mute" || door.kind !== "play" || series.phase !== "fight" || button.id === "kick")) {
     menuAction = button.id;
     return;
@@ -396,9 +452,8 @@ game.addEventListener("pointerup", forgetPointer);
 game.addEventListener("pointercancel", forgetPointer);
 
 function tick(now: number): void {
-  const portrait = needsLandscape(window.innerWidth, window.innerHeight);
-  document.body.classList.toggle("portrait", portrait);
-  if (!portrait) {
+  placeNameField();
+  {
     const touch = frameFromTouches(
       [...points.values()],
       controlLayout(window.innerWidth, window.innerHeight),
@@ -423,16 +478,7 @@ function tick(now: number): void {
         if (key === "backspace") digits = digits.slice(0, -1);
         else if (digits.length < 6) digits += key;
       }
-      if (digits !== door.digits) {
-        room?.close();
-        room = null;
-        door = {
-          kind: "join",
-          digits,
-          status: digits.length === 6 ? "Connecting..." : "Enter the host code",
-        };
-        if (digits.length === 6) connectGuest(digits);
-      }
+      if (digits !== door.digits) pushDigits(digits);
     }
     typed.length = 0;
     pressed.clear();

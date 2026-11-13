@@ -37,6 +37,21 @@ export function heldInput(frame: InputFrame): InputFrame {
   return { ...frame, jumpPressed: false, punchPressed: false, dodgePressed: false };
 }
 
+/**
+ * Several input packets can arrive before the host steps.
+ * Keep the latest stick, and don't drop a jump or punch that arrived earlier.
+ */
+export function takeGuestInput(pending: InputFrame | null, frame: InputFrame): InputFrame {
+  if (!pending) return frame;
+  return {
+    x: frame.x,
+    jumpHeld: frame.jumpHeld,
+    jumpPressed: pending.jumpPressed || frame.jumpPressed,
+    punchPressed: pending.punchPressed || frame.punchPressed,
+    dodgePressed: pending.dodgePressed || frame.dodgePressed,
+  };
+}
+
 export type NetMessage =
   | { t: "welcome"; slot: number; roster: number[] }
   | { t: "hello"; name: string }
@@ -86,7 +101,25 @@ export function copiedStatus(status: string): string {
 }
 
 export type DoorButton = {
-  id: "practice" | "host" | "join" | "start" | "cancel" | "copy" | "kick";
+  id:
+    | "practice"
+    | "host"
+    | "join"
+    | "start"
+    | "cancel"
+    | "copy"
+    | "kick"
+    | "back"
+    | "d0"
+    | "d1"
+    | "d2"
+    | "d3"
+    | "d4"
+    | "d5"
+    | "d6"
+    | "d7"
+    | "d8"
+    | "d9";
   x: number;
   y: number;
   w: number;
@@ -94,8 +127,157 @@ export type DoorButton = {
   label: string;
 };
 
+export type DoorBox = { x: number; y: number; w: number; h: number };
+
+export type DoorLayout = {
+  panel: DoorBox;
+  titleY: number;
+  lineY: number;
+  detailY: number;
+  nameY: number;
+  /** Where the player types the name that shows up as the host. */
+  field: DoorBox | null;
+  codeSize: number;
+  buttons: DoorButton[];
+};
+
 export function kickButton(width: number): DoorButton {
-  return { id: "kick", x: width - 124, y: 96, w: 96, h: 40, label: "Kick" };
+  const narrow = width < 720;
+  return { id: "kick", x: width - (narrow ? 104 : 124), y: narrow ? 156 : 120, w: 96, h: 40, label: "Kick" };
+}
+
+const DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"] as const;
+
+function actionSpecs(
+  view: "pick" | "host" | "join" | "notice",
+  canStart: boolean,
+  copy: boolean,
+): { id: DoorButton["id"]; label: string }[] {
+  if (view === "pick") {
+    return [
+      { id: "practice", label: "Practice" },
+      { id: "host", label: "Host" },
+      { id: "join", label: "Join" },
+    ];
+  }
+  if (view === "host") {
+    const buttons: { id: DoorButton["id"]; label: string }[] = [];
+    if (copy) buttons.push({ id: "copy", label: "Copy" });
+    if (canStart) buttons.push({ id: "start", label: "Start" }, { id: "kick", label: "Kick" });
+    buttons.push({ id: "cancel", label: "Cancel" });
+    return buttons;
+  }
+  if (view === "notice") return [{ id: "cancel", label: "Back" }];
+  return [{ id: "back", label: "Del" }, { id: "cancel", label: "Cancel" }];
+}
+
+/**
+ * The door has to fit a portrait phone and a short landscape phone.
+ * The room code, the name, and every button stay on screen.
+ */
+export function layoutDoor(
+  view: "pick" | "host" | "join" | "notice",
+  width: number,
+  height: number,
+  canStart: boolean,
+  copy = false,
+): DoorLayout {
+  const margin = 8;
+  const topLimit = 52;
+  const panelW = Math.min(460, Math.max(200, width - margin * 2));
+  const actions = actionSpecs(view, canStart, copy);
+  const keypad = view === "join";
+  const columns = 5;
+  const keyRows = keypad ? 2 : 0;
+  const gap = 8;
+  const fieldExtra = view === "pick" ? 8 : 0;
+
+  const place = (buttonH: number, lineGap: number, titlePad: number): DoorLayout => {
+    const panelX = Math.max(margin, (width - panelW) / 2);
+    const panelY = topLimit;
+    const titleY = panelY + titlePad;
+    const lineY = titleY + lineGap;
+    const detailY = lineY + lineGap;
+    const named = view === "host" && height >= 420;
+    const nameY = named ? detailY + lineGap : detailY;
+    const textBottom = view === "notice" ? lineY : view === "pick" ? detailY + fieldExtra : named ? nameY : detailY;
+    const innerX = panelX + 20;
+    const innerW = panelW - 40;
+    const buttons: DoorButton[] = [];
+    let cursor = textBottom + 12;
+
+    if (keypad) {
+      const keyW = (innerW - gap * (columns - 1)) / columns;
+      DIGITS.forEach((digit, index) => {
+        const col = index % columns;
+        const row = Math.floor(index / columns);
+        buttons.push({
+          id: `d${digit}` as DoorButton["id"],
+          label: digit,
+          x: innerX + col * (keyW + gap),
+          y: cursor + row * (buttonH + gap),
+          w: keyW,
+          h: buttonH,
+        });
+      });
+      cursor += keyRows * buttonH + keyRows * gap;
+    }
+
+    const actionW = Math.min(180, innerW);
+    const actionX = panelX + (panelW - actionW) / 2;
+    actions.forEach((action, index) => {
+      buttons.push({
+        ...action,
+        x: actionX,
+        y: cursor + index * (buttonH + gap),
+        w: actionW,
+        h: buttonH,
+      });
+    });
+
+    const field =
+      view === "pick"
+        ? { x: actionX, y: detailY - 14, w: actionW, h: Math.min(40, Math.max(30, buttonH - 8)) }
+        : null;
+    const last = buttons[buttons.length - 1];
+    const bottom = (last ? last.y + last.h : textBottom) + 12;
+    const panelH = bottom - panelY;
+    const centered = Math.max(topLimit, Math.min((height - panelH) / 2, height - margin - panelH));
+    const shift = centered - panelY;
+    if (shift !== 0) {
+      for (const button of buttons) button.y += shift;
+      if (field) field.y += shift;
+    }
+    return {
+      panel: { x: panelX, y: panelY + shift, w: panelW, h: panelH },
+      titleY: titleY + shift,
+      lineY: lineY + shift,
+      detailY: detailY + shift,
+      nameY: nameY + shift,
+      field,
+      codeSize: height < 420 ? 32 : 42,
+      buttons,
+    };
+  };
+
+  let buttonH = 52;
+  const codeLine = view === "host" || view === "join";
+  let lineGap = codeLine ? 36 : 30;
+  let titlePad = 34;
+  const minGap = codeLine ? 28 : 22;
+  let layout = place(buttonH, lineGap, titlePad);
+  const fits = (door: DoorLayout): boolean => {
+    const last = door.buttons[door.buttons.length - 1];
+    const bottom = last ? last.y + last.h : door.panel.y + door.panel.h;
+    return bottom <= height - margin && door.panel.y + door.panel.h <= height - margin + 1;
+  };
+  while (!fits(layout) && (buttonH > 32 || lineGap > minGap || titlePad > 24)) {
+    if (buttonH > 32) buttonH -= 2;
+    else if (lineGap > minGap) lineGap -= 2;
+    else titlePad -= 2;
+    layout = place(buttonH, lineGap, titlePad);
+  }
+  return layout;
 }
 
 export function doorButtons(
@@ -105,36 +287,7 @@ export function doorButtons(
   canStart: boolean,
   copy = false,
 ): DoorButton[] {
-  const w = 180;
-  const h = 52;
-  const x = (width - w) / 2;
-  const top = height / 2 - 10;
-  const stack = (labels: { id: DoorButton["id"]; label: string }[]): DoorButton[] =>
-    labels.map((button, index) => ({
-      ...button,
-      x,
-      y: top + index * (h + 12),
-      w,
-      h,
-    }));
-  if (view === "pick") {
-    return stack([
-      { id: "practice", label: "Practice" },
-      { id: "host", label: "Host" },
-      { id: "join", label: "Join" },
-    ]);
-  }
-  if (view === "host") {
-    const buttons: { id: DoorButton["id"]; label: string }[] = [];
-    if (copy) buttons.push({ id: "copy", label: "Copy" });
-    if (canStart) {
-      buttons.push({ id: "start", label: "Start" }, { id: "kick", label: "Kick" });
-    }
-    buttons.push({ id: "cancel", label: "Cancel" });
-    return stack(buttons);
-  }
-  if (view === "notice") return stack([{ id: "cancel", label: "Back" }]);
-  return stack([{ id: "cancel", label: "Cancel" }]);
+  return layoutDoor(view, width, height, canStart, copy).buttons;
 }
 
 function hello(value: object): NetMessage | null {

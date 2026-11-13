@@ -56,6 +56,7 @@ describe("sound cues", () => {
 
   it("labels the mute toggle", () => {
     expect(muteButton(false)).toMatchObject({ id: "mute", label: "Mute", x: 116 });
+    expect(muteButton(false, 390).x).toBe(8);
     expect(muteButton(true).label).toBe("Muted");
     expect(muteButton(false).w).toBeGreaterThanOrEqual(48);
     expect(muteButton(false).h).toBeGreaterThanOrEqual(36);

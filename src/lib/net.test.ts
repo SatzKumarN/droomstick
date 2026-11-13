@@ -11,10 +11,12 @@ import {
   encode,
   heldInput,
   kickButton,
+  layoutDoor,
   makeCode,
   openSlot,
   parseJoinCode,
   peerIdFor,
+  takeGuestInput,
 } from "./net";
 
 const frame = {
@@ -55,6 +57,14 @@ describe("room codes", () => {
 describe("messages", () => {
   it("keeps held movement and drops the one-frame buttons", () => {
     expect(heldInput(frame)).toEqual({ ...frame, jumpPressed: false });
+    const later = { ...frame, x: 0 as const, jumpPressed: false, punchPressed: true };
+    expect(takeGuestInput(null, later)).toEqual(later);
+    expect(takeGuestInput(frame, later)).toMatchObject({
+      x: 0,
+      jumpPressed: true,
+      punchPressed: true,
+      jumpHeld: true,
+    });
   });
 
   it("round-trips known messages and drops junk", () => {
@@ -106,9 +116,59 @@ describe("door buttons", () => {
       "kick",
       "cancel",
     ]);
-    expect(doorButtons("join", 800, 500, false)[0]?.id).toBe("cancel");
+    const join = doorButtons("join", 800, 500, false);
+    expect(join.map((button) => button.id)).toEqual([
+      "d1",
+      "d2",
+      "d3",
+      "d4",
+      "d5",
+      "d6",
+      "d7",
+      "d8",
+      "d9",
+      "d0",
+      "back",
+      "cancel",
+    ]);
     expect(doorButtons("notice", 800, 500, false)[0]?.label).toBe("Back");
     expect(kickButton(960).id).toBe("kick");
+    expect(kickButton(960).y).toBe(120);
+    expect(kickButton(400).y).toBeGreaterThan(120);
+  });
+
+  it("keeps the room code and the buttons on a short or portrait screen", () => {
+    for (const [width, height] of [
+      [960, 540],
+      [568, 320],
+      [390, 844],
+      [844, 390],
+    ] as const) {
+      for (const view of ["pick", "host", "join", "notice"] as const) {
+        const layout = layoutDoor(view, width, height, true, true);
+        expect(layout.panel.y).toBeGreaterThanOrEqual(52);
+        expect(layout.panel.y + layout.panel.h).toBeLessThanOrEqual(height + 1);
+        expect(layout.titleY).toBeGreaterThan(layout.panel.y);
+        expect(layout.titleY).toBeLessThan(layout.panel.y + layout.panel.h);
+        for (const button of layout.buttons) {
+          expect(button.x).toBeGreaterThanOrEqual(0);
+          expect(button.y).toBeGreaterThanOrEqual(0);
+          expect(button.x + button.w).toBeLessThanOrEqual(width + 1);
+          expect(button.y + button.h).toBeLessThanOrEqual(height + 1);
+          expect(button.h).toBeGreaterThanOrEqual(32);
+        }
+      }
+    }
+    const shortHost = layoutDoor("host", 568, 320, true, true);
+    expect(shortHost.lineY - shortHost.titleY).toBeGreaterThanOrEqual(26);
+    expect(layoutDoor("join", 568, 320, false).lineY - layoutDoor("join", 568, 320, false).titleY).toBeGreaterThanOrEqual(26);
+    expect(layoutDoor("pick", 960, 540, false).field).not.toBeNull();
+    expect(layoutDoor("host", 390, 844, true, true).buttons.map((button) => button.id)).toEqual([
+      "copy",
+      "start",
+      "kick",
+      "cancel",
+    ]);
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NAME_LIMIT, clampName, displayName, labelFor, typeName } from "./name";
+import { NAME_LIMIT, clampName, displayName, editName, labelFor, typeName } from "./name";
 
 describe("nicknames", () => {
   it("keeps letters and a single space, and stops at 12", () => {
@@ -21,6 +21,8 @@ describe("nicknames", () => {
     expect(typeName(full, "b")).toBe(full);
     expect(typeName(full, " ")).toBe(full);
     expect(clampName("  Sam!! K  ")).toBe("Sam K");
+    expect(editName("Sam ")).toBe("Sam ");
+    expect(editName("Sam  K")).toBe("Sam K");
   });
 
   it("falls back to the color when the nickname is blank", () => {

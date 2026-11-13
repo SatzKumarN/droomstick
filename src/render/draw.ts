@@ -3,7 +3,7 @@ import { BARREL, formatClock } from "../lib/crumble";
 import { HP, MATCH_MS, SERIES_LENGTH } from "../lib/constants";
 import { displayName, labelFor } from "../lib/name";
 import { colorForSlot, type BroomColor } from "../lib/palette";
-import { doorButtons, kickButton, type DoorView } from "../lib/net";
+import { kickButton, layoutDoor, type DoorView } from "../lib/net";
 import { seriesButtons, standings, type Series } from "../lib/series";
 import { isGrounded, type Sim } from "../lib/physics";
 import { controlLayout, type ButtonBox, type ControlLayout } from "../lib/input";
@@ -32,9 +32,16 @@ export function drawFrame(
   muted = false,
 ): ControlLayout {
   const layout = controlLayout(cssWidth, cssHeight);
-  ctx.setTransform(cssWidth / VIEW_W, 0, 0, cssHeight / VIEW_H, 0, 0);
+  const portrait = cssHeight > cssWidth;
+  const reserve = portrait ? Math.min(168, Math.round(cssHeight * 0.26)) : 0;
+  const viewH = Math.max(1, cssHeight - reserve);
+  const scale = Math.min(cssWidth / VIEW_W, viewH / VIEW_H);
+  const ox = (cssWidth - VIEW_W * scale) / 2;
+  const oy = Math.max(0, (viewH - VIEW_H * scale) / 2);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = "#d7c4a3";
-  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.fillRect(0, 0, cssWidth, cssHeight);
+  ctx.setTransform(scale, 0, 0, scale, ox, oy);
   ctx.fillStyle = "#6a4a30";
   for (const platform of [...sim.platforms, ...sim.chunks]) {
     const width = platform.bounds.max.x - platform.bounds.min.x;
@@ -86,7 +93,7 @@ export function drawFrame(
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (door.kind !== "play") {
     drawDoor(ctx, door, cssWidth, cssHeight, nickname);
-    paintButton(ctx, muteButton(muted));
+    paintButton(ctx, muteButton(muted, cssWidth));
     return layout;
   }
   if (series.phase === "fight" || series.phase === "intermission") {
@@ -123,44 +130,43 @@ function drawDoor(
 ): void {
   ctx.fillStyle = "rgba(20, 20, 20, 0.45)";
   ctx.fillRect(0, 0, width, height);
-  const panelW = Math.min(460, width - 40);
-  const crowded = door.kind === "host" && door.canStart;
-  const panelH = crowded ? 520 : 360;
-  const x = (width - panelW) / 2;
-  const y = height / 2 - (crowded ? 270 : 190);
-  ctx.fillStyle = "#f3e6cf";
-  ctx.fillRect(x, y, panelW, panelH);
-  ctx.fillStyle = "#141414";
-  ctx.textAlign = "center";
-  ctx.font = "28px sans-serif";
-  ctx.fillText("Droomstick: Mayhem", width / 2, y + 64);
-  ctx.font = "18px sans-serif";
-  if (door.kind === "pick") {
-    ctx.fillText("Practice here, or play a friend.", width / 2, y + 108);
-    ctx.fillText(`Name: ${displayName(nickname, "Red")}`, width / 2, y + 140);
-  } else if (door.kind === "host") {
-    ctx.font = "42px sans-serif";
-    ctx.fillText(door.code || "......", width / 2, y + 120);
-    ctx.font = "18px sans-serif";
-    ctx.fillText(door.status, width / 2, y + 156);
-  } else if (door.kind === "notice") {
-    ctx.fillText(door.status, width / 2, y + 120);
-  } else {
-    const digits = `${door.digits}${"·".repeat(6 - door.digits.length)}`;
-    ctx.font = "42px sans-serif";
-    ctx.fillText(digits, width / 2, y + 120);
-    ctx.font = "18px sans-serif";
-    ctx.fillText(door.status, width / 2, y + 156);
-  }
-  for (const button of doorButtons(
+  const layout = layoutDoor(
     door.kind,
     width,
     height,
     door.kind === "host" ? door.canStart : false,
     door.kind === "host" && door.code.length === 6,
-  )) {
-    paintButton(ctx, button);
+  );
+  const { panel } = layout;
+  ctx.fillStyle = "#f3e6cf";
+  ctx.fillRect(panel.x, panel.y, panel.w, panel.h);
+  ctx.fillStyle = "#141414";
+  ctx.textAlign = "center";
+  ctx.font = height < 420 ? "22px sans-serif" : "28px sans-serif";
+  ctx.fillText("Droomstick: Mayhem", width / 2, layout.titleY);
+  ctx.font = "18px sans-serif";
+  if (door.kind === "pick") {
+    ctx.fillText("Practice here, or play a friend.", width / 2, layout.lineY);
+  } else if (door.kind === "host") {
+    ctx.font = `${layout.codeSize}px sans-serif`;
+    ctx.fillText(door.code || "......", width / 2, layout.lineY);
+    ctx.font = "18px sans-serif";
+    ctx.fillText(
+      height < 420 ? `${door.status} · ${displayName(nickname, "Red")}` : door.status,
+      width / 2,
+      layout.detailY,
+    );
+    if (height >= 420) ctx.fillText(`Host: ${displayName(nickname, "Red")}`, width / 2, layout.nameY);
+  } else if (door.kind === "notice") {
+    ctx.fillText(door.status, width / 2, layout.lineY);
+  } else {
+    const digits = `${door.digits}${"·".repeat(6 - door.digits.length)}`;
+    ctx.font = `${layout.codeSize}px sans-serif`;
+    ctx.fillText(digits, width / 2, layout.lineY);
+    ctx.font = "18px sans-serif";
+    ctx.fillText(door.status, width / 2, layout.detailY);
   }
+  for (const button of layout.buttons) paintButton(ctx, button);
 }
 
 function drawMatch(ctx: CanvasRenderingContext2D, series: Series): void {
@@ -178,10 +184,10 @@ function drawMenu(
 ): void {
   ctx.fillStyle = "rgba(20, 20, 20, 0.45)";
   ctx.fillRect(0, 0, width, height);
-  const panelW = Math.min(460, width - 40);
-  const panelH = 320;
+  const panelW = Math.min(460, width - 24);
+  const panelH = Math.min(320, height - 16);
   const x = (width - panelW) / 2;
-  const y = height / 2 - 170;
+  const y = Math.max(8, Math.min(height / 2 - 170, height - panelH - 8));
   ctx.fillStyle = "#f3e6cf";
   ctx.fillRect(x, y, panelW, panelH);
   ctx.fillStyle = "#141414";
